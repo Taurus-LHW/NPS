@@ -1,0 +1,1625 @@
+<!DOCTYPE html>
+<html lang="zh-TW" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NotebookLM PPTX Studio</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.5/dist/tesseract.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stackblur-canvas/2.5.0/stackblur.min.js"></script>
+    <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap');
+        
+        :root { --primary: #2563EB; --bg: #F8FAFC; }
+        .dark { --bg: #0F172A; }
+
+        body { font-family: 'Plus Jakarta Sans', 'Noto Sans TC', sans-serif; background-color: var(--bg); transition: 0.3s; color: #1e293b; overflow: hidden; }
+        .dark body { color: #f1f5f9; }
+
+        /* UI Layout */
+        #editor-modal { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; background-color: #0f172a; }
+        .editor-canvas-area { flex: 1; position: relative; overflow: auto; display: flex; align-items: center; justify-content: center; background-color: #0f172a; background-image: linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px); background-size: 20px 20px; }
+        .editor-sidebar { width: 320px; background-color: #1e293b; border-left: 1px solid #334155; display: flex; flex-direction: column; height: 100%; flex-shrink: 0; }
+        .sidebar-content { flex: 1; overflow-y: auto; padding: 1.25rem; display: flex; flex-direction: column; gap: 1.25rem; }
+        .sidebar-footer { padding: 1.25rem; border-top: 1px solid #334155; background-color: #1e293b; flex-shrink: 0; }
+        
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.3); border-radius: 3px; }
+
+        /* Editor Stage */
+        #editor-stage { position: relative; box-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.5); transform-origin: center center; transition: transform 0.2s ease-out; }
+        .layer-mask { position: absolute; border: 1px dashed rgba(239, 68, 68, 0.5); cursor: move; z-index: 20; box-sizing: border-box; background-color: rgba(255,255,255,0.1); transition: border 0.2s, background 0.2s; }
+        .layer-mask:hover { z-index: 25; border: 2px solid #ef4444; background-color: rgba(255,255,255,0.2); }
+        .layer-mask.blur-mode { backdrop-filter: blur(8px); border-color: #ec4899; }
+        
+        .preview-mode .layer-mask { border: none !important; opacity: 1 !important; z-index: 10; }
+        .preview-mode .layer-text { border: none !important; background: transparent !important; z-index: 20; }
+        .preview-mode .resize-handle, .preview-mode .text-resize-handle { display: none !important; }
+
+        /* pointer-events: auto */
+        .layer-text { position: absolute; border: 1px solid rgba(59, 130, 246, 0.4); z-index: 40; cursor: move; pointer-events: auto !important; display: flex; align-items: center; justify-content: flex-start; padding: 2px; box-sizing: border-box; overflow: visible; white-space: pre-wrap; word-wrap: break-word; }
+        .layer-text.active { border: 2px solid #3B82F6; z-index: 50; }
+        
+        .resize-handle { position: absolute; bottom: -5px; right: -5px; width: 10px; height: 10px; background: #ef4444; border: 2px solid white; border-radius: 50%; cursor: nwse-resize; display: none; z-index: 60; }
+        .layer-mask:hover .resize-handle, .layer-mask.active .resize-handle { display: block; }
+        
+        .text-resize-handle { position: absolute; bottom: -5px; right: -5px; width: 10px; height: 10px; background: #4F46E5; border: 2px solid white; border-radius: 50%; cursor: nwse-resize; display: none; z-index: 60; }
+        .layer-text:hover .text-resize-handle, .layer-text.active .text-resize-handle { display: block; }
+
+        /* Components */
+        .glass-card { background: rgba(255,255,255,0.9); border: 1px solid #e2e8f0; backdrop-filter: blur(8px); }
+        .dark .glass-card { background: rgba(30,41,59,0.9); border-color: rgba(255,255,255,0.1); }
+        .hidden { display: none !important; }
+        .btn { @apply px-4 py-2 rounded-lg font-bold transition shadow-sm active:scale-95 flex items-center justify-center gap-2; }
+	.input-field { @apply w-full border border-slate-300 dark:border-slate-600 rounded-lg p-2.5 text-sm focus:border-blue-500 outline-none transition;
+            background-color: #ffffff; color: #1e293b; color-scheme: light;}
+        .dark .input-field {background-color: #0f172a; color: #ffffff; color-scheme: dark;}
+
+        .input-label {@apply block text-xs font-bold uppercase tracking-wider mb-1 text-slate-500 dark:text-slate-400;}        
+.layer-text span {
+            pointer-events: none; width: 100%;
+            font-family: "Microsoft JhengHei", sans-serif; 
+            line-height: 1.2;
+            text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff,     0px 0px 1px rgba(0,0,0,0.8); 
+            font-weight: 600;   }
+        
+        .mode-selector { background: rgba(241, 245, 249, 0.8); padding: 0.5rem; border-radius: 1rem; display: flex; gap: 0.75rem; border: 1px solid rgba(226, 232, 240, 0.8); }
+        .dark .mode-selector { background: rgba(30, 41, 59, 0.8); border-color: rgba(255,255,255,0.1); }
+        .mode-btn { flex: 1; padding: 0.75rem; border-radius: 0.75rem; border: 1px solid transparent; font-size: 0.875rem; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 0.5rem; transition: all 0.2s; color: #64748b; }
+        .dark .mode-btn { color: #94a3b8; }
+        .mode-btn:hover { background: rgba(255, 255, 255, 0.8); color: #475569; }
+        .dark .mode-btn:hover { background: rgba(255, 255, 255, 0.1); color: #e2e8f0; }
+        .mode-btn.active { background: #ffffff; color: #4f46e5; border-color: #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        .dark .mode-btn.active { background: #1e293b; color: #818cf8; border-color: #475569; }
+
+        #global-loading-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(5px); z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; transition: opacity 0.3s; }
+        .loader { width: 48px; height: 48px; border: 5px solid #FFF; border-bottom-color: #3B82F6; border-radius: 50%; display: inline-block; box-sizing: border-box; animation: rotation 1s linear infinite; }
+        @keyframes rotation { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .progress-shimmer { background: linear-gradient(90deg, #3B82F6 0%, #60A5FA 50%, #3B82F6 100%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+        .log-line { font-family: monospace; font-size: 11px; margin-bottom: 4px; border-left: 2px solid #cbd5e1; padding-left: 6px; }
+        .log-info { border-color: #3b82f6; color: #334155; }
+        .log-warn { border-color: #f59e0b; color: #b45309; }
+        .log-error { border-color: #ef4444; color: #b91c1c; }
+        .log-success { border-color: #22c55e; color: #15803d; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col gap-6 p-4 md:p-6 lg:p-8 overflow-auto">
+
+    <div id="global-loading-overlay" class="hidden">
+        <span class="loader mb-4"></span>
+        <h3 class="text-xl font-bold">處理中...</h3>
+        <p class="text-sm text-slate-300" id="global-loading-msg">正在載入檔案</p>
+    </div>
+
+<header class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div class="space-y-1">
+            <div class="flex items-center gap-2">
+                <h1 class="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+                    <span class="text-blue-600">NPS</span> Notebook Presentation Studio
+                </h1>
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300">made by L.HW</span>
+            </div>
+            <p class="text-slate-500 dark:text-slate-400 text-sm">AI-Powered Slide Remastering Tool</p>
+        </div>
+
+        <div class="flex gap-2">
+            <button onclick="resetApp()" class="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg text-sm font-bold transition flex items-center gap-1 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400">
+                🗑️ 重置
+            </button>
+            <button id="theme-toggle" class="p-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition">🌓</button>
+            <button id="settings-btn" class="px-4 py-2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-lg text-sm font-bold hover:opacity-90 transition shadow-lg">⚙️ 設定</button>
+        </div>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
+        <div class="lg:col-span-8 space-y-6">
+            <div class="mode-selector">
+                <button id="mode-ai" class="mode-btn active" onclick="setMode('ai')">
+                    <span>☁️</span> 雲端 AI 模式 <span class="text-[10px] opacity-70 font-normal ml-1">(Gemini)</span>
+                </button>
+                <button id="mode-offline" class="mode-btn" onclick="setMode('offline')">
+                    <span>🔒</span> 離線模式 <span class="text-[10px] opacity-70 font-normal ml-1">(Tesseract)</span>
+                </button>
+            </div>
+            
+            <div id="upload-view" class="glass-card rounded-2xl p-10 text-center cursor-pointer border-2 border-dashed border-slate-300 dark:border-slate-600 hover:border-blue-500 transition-all group">
+                <div class="w-16 h-16 bg-blue-50 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-500 group-hover:scale-110 transition-transform">
+                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                </div>
+                <p class="font-bold text-lg text-slate-700 dark:text-slate-200">點擊、拖放 或 Ctrl+V 貼上圖片</p>
+                <input type="file" id="file-input" class="hidden" multiple accept=".pdf,image/*">
+            </div>
+
+<div id="selection-view" class="hidden glass-card rounded-2xl p-6 space-y-4">
+                <div class="flex justify-between items-center border-b border-slate-200 dark:border-slate-700 pb-3">
+                    <h3 class="font-bold text-slate-800 dark:text-white">待處理頁面 (<span id="page-count-badge">0</span>)</h3>
+                    
+		<div class="flex items-center gap-4">
+                         <div class="flex bg-slate-100 dark:bg-slate-700 rounded-lg p-1">
+                            <button onclick="rotateAll(-90)" class="px-2 py-1 text-xs hover:bg-white dark:hover:bg-slate-600 rounded transition font-bold text-slate-600 dark:text-slate-300" title="全部向左轉">↺ 全左</button>
+                            <div class="w-px bg-slate-300 mx-1"></div>
+                            <button onclick="rotateAll(90)" class="px-2 py-1 text-xs hover:bg-white dark:hover:bg-slate-600 rounded transition font-bold text-slate-600 dark:text-slate-300" title="全部向右轉">全右 ↻</button>
+                        </div>
+                        <div class="space-x-2 text-xs">
+                            <button id="select-all" class="text-blue-600 font-bold hover:underline">全選</button>
+                            <button id="deselect-all" class="text-slate-400 hover:underline">清空</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="thumbnail-grid" class="grid grid-cols-2 sm:grid-cols-3 gap-4 max-h-[500px] overflow-y-auto pr-2 pb-2"></div>
+<div class="flex gap-4 pt-2">
+    <button onclick="resetApp(true)" class="px-4 py-2.5 bg-slate-200 text-slate-600 rounded-xl font-bold hover:bg-slate-300 transition">❌ 重選</button>
+
+    <button id="start-process-btn" class="flex-1 px-5 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-xl transition active:scale-[0.98]">🚀 開始分析</button>
+    <button id="export-ppt-btn" class="hidden flex-1 px-5 py-2.5 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 shadow-xl transition active:scale-[0.98]">📥 下載 PPTX</button>
+</div>            </div>
+
+            <div id="progress-view" class="hidden glass-card rounded-2xl p-10 text-center space-y-6">
+                <div class="relative w-20 h-20 mx-auto">
+                    <div class="absolute inset-0 rounded-full border-4 border-slate-100 dark:border-slate-800"></div>
+                    <div id="progress-spinner" class="absolute inset-0 rounded-full border-4 border-blue-600 border-t-transparent animate-spin"></div>
+                </div>
+                <div>
+                    <h3 id="progress-title" class="text-xl font-bold text-slate-800 dark:text-white">初始化...</h3>
+                    <p id="progress-detail" class="text-sm text-slate-500 mt-2 font-mono">準備中...</p>
+                </div>
+                <div class="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
+                    <div id="progress-bar" class="progress-shimmer h-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div id="result-view" class="hidden glass-card rounded-2xl p-8 text-center space-y-6">
+                <div class="w-20 h-20 bg-green-100 dark:bg-green-900/30 text-green-600 rounded-full flex items-center justify-center mx-auto text-3xl">✓</div>
+                <h2 class="text-2xl font-bold text-slate-800 dark:text-white">分析完成！</h2>
+                <p class="text-slate-500 text-sm">請進入編輯器微調內容，確認無誤後下載。</p>
+<div class="flex flex-col sm:flex-row gap-3 justify-center">
+    <button id="download-btn" class="px-8 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 shadow-lg transition flex items-center justify-center gap-2">
+        <span>📥</span> 下載 PPTX
+    </button>
+
+    <button onclick="resetApp(true)" class="px-8 py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-200 rounded-xl font-bold hover:bg-slate-200 transition">
+        🔄 處理下一份
+    </button>
+</div>            </div>
+        </div>
+
+        <div class="lg:col-span-4 flex flex-col h-[500px] lg:h-auto glass-card rounded-2xl overflow-hidden">
+            <div class="p-3 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
+                <h3 class="font-bold text-sm text-slate-600 dark:text-slate-300 flex items-center gap-2">
+                    <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span> 系統日誌
+                </h3>
+            </div>
+            <div id="log-console" class="flex-1 bg-white dark:bg-slate-900 p-4 overflow-y-auto text-xs font-mono space-y-2">
+                <div class="log-info log-line">系統就緒。等待檔案輸入...</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="settings-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+        <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4 animate-bounce-in">
+            <h2 class="text-xl font-bold text-slate-900 dark:text-white">API 設定</h2>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Gemini API Key</label>
+                    <input type="password" id="api-key-input" placeholder="AIza..." class="w-full p-3 border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800 dark:text-white outline-none transition">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase mb-1">模型選擇</label>
+                    <select id="model-select" class="w-full p-3 border border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800 dark:text-white outline-none">
+                        <option value="gemini-3-flash-preview">Gemini 3 Flash Preview (預設)</option>
+                        <option value="gemini-2.5-pro">Gemini 2.5 pro</option>
+                        <option value="gemini-2.5-flash-preview-09-2025">Gemini 2.5 Flash Preview 09-2025</option>
+                    </select>
+                </div>
+                <button onclick="saveSettings()" class="w-full py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition">儲存設定</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="editor-modal" class="hidden">
+        
+        <div class="h-16 bg-slate-900 border-b border-slate-700 flex justify-between items-center px-6 shadow-md z-20 flex-shrink-0">
+            <div class="flex items-center gap-4">
+                <div class="flex flex-col">
+                    <h3 class="font-bold text-lg text-white tracking-tight">視覺編輯器</h3>
+                    <p class="text-[10px] text-slate-400">NotebookLM PPTX Studio</p>
+                </div>
+                
+                <div class="flex items-center bg-slate-800 rounded-lg p-1 border border-slate-600 ml-4">
+                    <button onclick="changePage(-1)" id="prev-page-btn" class="p-1.5 hover:bg-slate-700 text-slate-300 rounded transition disabled:opacity-30 disabled:cursor-not-allowed" title="上一頁">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+                    </button>
+                    <span class="text-xs text-white font-mono px-3 font-bold select-none" id="editor-page-label">Page 1</span>
+                    <button onclick="changePage(1)" id="next-page-btn" class="p-1.5 hover:bg-slate-700 text-slate-300 rounded transition disabled:opacity-30 disabled:cursor-not-allowed" title="下一頁">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-3">
+                <button id="toggle-preview-btn" onclick="togglePreviewMode()" class="px-4 py-2 rounded-lg text-sm font-bold text-slate-300 border border-slate-600 hover:bg-slate-800 transition flex items-center gap-2">
+                    <span>👁️</span> 預覽模式
+                </button>
+                <button onclick="closeEditor()" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-bold shadow-lg shadow-indigo-500/30 transition flex items-center gap-2">
+                    <span>✓</span> 完成編輯
+                </button>
+            </div>
+        </div>
+        
+        <div class="flex-1 flex overflow-hidden">
+            
+            <div class="editor-canvas-area" id="editor-canvas-area">
+                <div id="editor-stage" class="cursor-default">
+                    <img id="editor-img" class="block w-full h-full select-none rounded shadow-2xl" draggable="false">
+                    <div id="editor-mask-layer" class="absolute inset-0"></div>
+                    <div id="editor-text-layer" class="absolute inset-0"></div>
+                </div>
+                
+                <div id="editor-hint" class="absolute bottom-6 left-1/2 -translate-x-1/2 bg-slate-800/90 backdrop-blur px-4 py-2 rounded-full border border-slate-600/50 text-xs text-slate-400 pointer-events-none shadow-xl transition-opacity">
+                    💡 提示：拖曳紅框調整遮罩，雙擊文字進行編輯
+                </div>
+            </div>
+            
+            <div id="editor-toolbar" class="editor-sidebar hidden md:flex">
+                <div class="p-5 border-b border-slate-700 flex justify-between items-center bg-slate-800/50">
+                    <h4 class="text-white text-sm font-bold flex items-center gap-2"><span>🛠️</span> 屬性面板</h4>
+                    <button id="ai-qa-btn" onclick="triggerAIQA()" class="group relative px-3 py-1.5 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white rounded-lg text-[10px] font-bold shadow-lg border border-white/10 transition-all active:scale-95 overflow-hidden">
+                        <div class="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
+                        <span class="relative flex items-center gap-1">✨ AI 精修</span>
+                    </button>
+                </div>
+
+                <div class="sidebar-content custom-scrollbar space-y-5">
+                    
+                    <div class="space-y-1">
+                        <label class="input-label text-white" >文字內容</label>
+                        <textarea id="edit-text-val" rows="4" class="input-field resize-none leading-relaxed " placeholder="選擇一個區塊..."></textarea>
+                    </div>
+                    
+<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div class="space-y-1">
+                            <label class="input-label text-white">字級 (pt)</label>
+                            <input type="number" id="edit-size-val" class="input-field" style="width: 4ch;" min="8">
+                        </div>
+                        <div class="space-y-1">
+                            <label class="input-label text-white">遮罩模式</label>
+                            <select id="edit-mask-type" class="input-field cursor-pointer">
+                                <option value="solid">單色 (Solid)</option>
+                                <option value="blur">模糊 (Blur)</option>
+                            </select>
+                        </div>
+                    </div>
+
+<div class="border-t border-slate-700 my-2"></div>
+
+                    <div class="space-y-3">
+                        <div class="space-y-1">
+                            <label class="input-label flex justify-between text-white">
+                                文字顏色 
+                                <span id="val-text-color" class="font-mono text-white normal-case">#000000</span>
+                            </label>
+                            <div class="flex gap-2">
+                                <div class="relative flex-1 h-9 rounded-lg overflow-hidden border border-slate-600">
+                                    <input type="color" id="edit-text-color" class="absolute -top-2 -left-2 w-[150%] h-[150%] cursor-pointer p-0 border-0">
+                                </div>
+                                <button onclick="activateEyedropper('text')" class="w-9 h-9 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded-lg flex items-center justify-center text-white transition" title="從圖片吸取顏色">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.5 4.5l-2.5 2.5 2.5 2.5M15.5 8.5L5 19l4 4 10.5-10.5L15.5 8.5zM3 21l3-1 1-3"></path></svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="space-y-1">
+                            <label class="input-label flex justify-between text-white">
+                                遮罩背景色 
+                                <span id="val-bg-color" class="font-mono text-white  normal-case">#FFFFFF</span>
+                            </label>
+                            <div class="flex gap-2">
+                                <div class="relative flex-1 h-9 rounded-lg overflow-hidden border border-slate-600">
+                                    <input type="color" id="edit-bg-color" class="absolute -top-2 -left-2 w-[150%] h-[150%] cursor-pointer p-0 border-0">
+                                </div>
+                                <button onclick="activateEyedropper('bg')" class="w-9 h-9 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded-lg flex items-center justify-center text-white transition" title="從圖片吸取顏色">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.5 4.5l-2.5 2.5 2.5 2.5M15.5 8.5L5 19l4 4 10.5-10.5L15.5 8.5zM3 21l3-1 1-3"></path></svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <div class="sidebar-footer">
+                     <button onclick="deleteSelectedBlock()" class="w-full py-3 bg-red-500/10 text-red-400 border border-red-500/30 rounded-xl text-sm font-bold hover:bg-red-500/20 hover:border-red-500/50 transition flex items-center justify-center gap-2 group">
+                        <span class="group-hover:scale-110 transition-transform">🗑️</span> 刪除此區塊
+                     </button>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <div id="custom-dialog-overlay" class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm opacity-0 pointer-events-none transition-opacity duration-200 hidden">
+        <div class="bg-white dark:bg-slate-800 rounded-xl shadow-2xl max-w-sm w-full p-6 transform scale-95 transition-transform duration-200">
+            <h3 id="dialog-title" class="text-lg font-bold mb-2">標題</h3>
+            <p id="dialog-msg" class="text-sm text-gray-600 dark:text-gray-300 mb-6">內容</p>
+            <input id="dialog-input" type="text" class="hidden w-full p-2 border rounded mb-4 dark:bg-slate-800 dark:border-slate-600" />
+            <div class="flex justify-end gap-2">
+                <button id="dialog-cancel" class="px-4 py-2 text-sm text-gray-500 hover:bg-gray-100 rounded transition hidden">取消</button>
+                <button id="dialog-ok" class="px-6 py-2 bg-blue-600 text-white rounded text-sm font-bold hover:bg-blue-700 transition">確定</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+// ==========================================
+// 1. 工具與設定 (Utils & Setup)
+// ==========================================
+function log(msg, type='info') {
+    const el = document.getElementById('log-console');
+    if (!el) return;
+    const color = type==='error'?'text-red-500':type==='success'?'text-green-500':'text-slate-500';
+    el.innerHTML += `<div class="${color} log-line">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+    el.scrollTop = el.scrollHeight;
+}
+
+async function resetApp(skipConfirm = false) {
+    if (!skipConfirm && APP.pages.length > 0) {
+        if (!(await Dialog.confirm("確定要重新開始嗎？目前的進度將會遺失。"))) return;
+    }
+
+    APP.pages = [];
+    APP.editor = { isPreview: false, currentIdx: -1, selectedBlockIdx: -1, pickingColor: null };
+    APP.currentFileName = 'Presentation';
+
+    const views = ['selection-view', 'progress-view', 'result-view', 'editor-modal'];
+    views.forEach(id => document.getElementById(id).classList.add('hidden'));
+    document.getElementById('upload-view').classList.remove('hidden');
+
+    document.getElementById('thumbnail-grid').innerHTML = '';
+    document.getElementById('file-input').value = ''; 
+    
+    const badge = document.getElementById('page-count-badge');
+    if(badge) badge.innerText = '0';
+    
+    const startBtn = document.getElementById('start-process-btn');
+    if(startBtn) startBtn.innerText = "🚀 開始分析";
+    
+    document.getElementById('export-ppt-btn').classList.add('hidden');
+    document.getElementById('log-console').innerHTML = '<div class="log-info log-line">系統已重置，等待新檔案...</div>';
+
+    log('系統已重置。', 'info');
+}
+
+function setMode(mode) {
+    APP.mode = mode;
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+    const btn = document.getElementById(`mode-${mode}`);
+    if (btn) btn.classList.add('active');
+}
+
+function toggleSettings(show) { 
+    document.getElementById('settings-modal').classList.toggle('hidden', !show); 
+}
+
+function saveSettings() {
+    APP.apiKey = document.getElementById('api-key-input').value;
+    APP.model = document.getElementById('model-select').value;
+    localStorage.setItem('gemini_api_key', APP.apiKey);
+    localStorage.setItem('gemini_model', APP.model);
+    toggleSettings(false);
+    log('設定已儲存', 'success');
+}
+
+function toggleTheme() {
+    document.documentElement.classList.toggle('dark');
+    localStorage.setItem('theme', document.documentElement.classList.contains('dark') ? 'dark' : 'light');
+}
+
+function bindSafeClick(id, fn) { 
+    const el = document.getElementById(id); 
+    if(el) el.onclick = fn; 
+}
+
+function showGlobalLoading(show, msg = "載入中...") {
+    const el = document.getElementById('global-loading-overlay');
+    const msgEl = document.getElementById('global-loading-msg');
+    if (show) { 
+        if(msgEl) msgEl.innerText = msg; 
+        if(el) el.classList.remove('hidden'); 
+    } else { 
+        if(el) el.classList.add('hidden'); 
+    }
+}
+
+const Dialog = {
+    overlay: document.getElementById('custom-dialog-overlay'),
+    title: document.getElementById('dialog-title'),
+    msg: document.getElementById('dialog-msg'),
+    input: document.getElementById('dialog-input'),
+    okBtn: document.getElementById('dialog-ok'),
+    cancelBtn: document.getElementById('dialog-cancel'),
+    show(type, title, msg, defaultValue = '') {
+        return new Promise(resolve => {
+            if(!this.overlay) return;
+            this.title.innerText = title; this.msg.innerText = msg; 
+            this.overlay.classList.remove('hidden'); 
+            this.overlay.classList.add('opacity-100', 'pointer-events-auto');
+            this.input.classList.toggle('hidden', type !== 'prompt');
+            this.cancelBtn.classList.toggle('hidden', type === 'alert');
+            if (type === 'prompt') { this.input.value = defaultValue; this.input.focus(); }
+            
+            const close = (val) => { 
+                this.overlay.classList.remove('opacity-100', 'pointer-events-auto'); 
+                this.overlay.classList.add('hidden'); 
+                resolve(val); 
+            };
+            
+            const newOk = this.okBtn.cloneNode(true);
+            const newCancel = this.cancelBtn.cloneNode(true);
+            this.okBtn.parentNode.replaceChild(newOk, this.okBtn);
+            this.cancelBtn.parentNode.replaceChild(newCancel, this.cancelBtn);
+            this.okBtn = newOk; this.cancelBtn = newCancel;
+
+            this.okBtn.onclick = () => { if (type === 'prompt') close(this.input.value); else close(true); };
+            this.cancelBtn.onclick = () => close(false);
+        });
+    },
+    alert(msg) { return this.show('alert', '提示', msg); },
+    confirm(msg) { return this.show('confirm', '確認', msg); },
+    prompt(msg, val) { return this.show('prompt', '輸入', msg, val); }
+};
+
+let cvReady = false;
+function onOpenCvReady() { cvReady = true; log('OpenCV 核心模組已載入。', 'success'); }
+
+const APP = {
+    mode: 'ai', 
+    apiKey: localStorage.getItem('gemini_api_key') || '',
+    model: localStorage.getItem('gemini_model') || 'gemini-3-flash-preview',
+    pages: [],
+    tesseractWorker: null,
+    editor: { isPreview: false, currentIdx: -1, selectedBlockIdx: -1, pickingColor: null },
+    currentFileName: 'Presentation'
+};
+
+if (typeof pdfjsLib !== 'undefined') { 
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; 
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const apiKeyInput = document.getElementById('api-key-input');
+    const modelSelect = document.getElementById('model-select');
+    if(apiKeyInput) apiKeyInput.value = APP.apiKey;
+    if(modelSelect) modelSelect.value = APP.model;
+    if (localStorage.getItem('theme') === 'dark') document.documentElement.classList.add('dark');
+
+    const dropZone = document.getElementById('upload-view');
+    const fileInput = document.getElementById('file-input');
+    if (dropZone && fileInput) {
+        dropZone.onclick = () => fileInput.click();
+        fileInput.onchange = e => handleFiles(e.target.files);
+        dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('border-indigo-500', 'bg-indigo-50', 'dark:bg-slate-800'); });
+        dropZone.addEventListener('dragleave', e => { dropZone.classList.remove('border-indigo-500', 'bg-indigo-50', 'dark:bg-slate-800'); });
+        dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('border-indigo-500', 'bg-indigo-50', 'dark:bg-slate-800'); handleFiles(e.dataTransfer.files); });
+    }
+
+    document.addEventListener('paste', (e) => {
+        const items = e.clipboardData.items;
+        const files = [];
+        for (let i = 0; i < items.length; i++) { if (items[i].type.indexOf('image') !== -1) files.push(items[i].getAsFile()); }
+        if (files.length > 0) handleFiles(files);
+    });
+
+    bindSafeClick('settings-btn', () => toggleSettings(true));
+    bindSafeClick('theme-toggle', toggleTheme);
+    bindSafeClick('start-process-btn', startProcessing);
+    bindSafeClick('export-ppt-btn', exportPPTX);
+    bindSafeClick('download-btn', exportPPTX);
+    bindSafeClick('select-all', () => { APP.pages.forEach(p => p.selected = true); renderGrid(); });
+    bindSafeClick('deselect-all', () => { APP.pages.forEach(p => p.selected = false); renderGrid(); });
+    
+    const inputs = ['edit-text-val', 'edit-size-val', 'edit-mask-type', 'edit-text-color', 'edit-bg-color'];
+    inputs.forEach(id => {
+        const el = document.getElementById(id);
+        if(el) el.addEventListener('input', syncEditorChanges);
+    });
+    
+    // 綁定吸管
+    const editorImg = document.getElementById('editor-img');
+    if(editorImg) editorImg.addEventListener('click', handleEyedropperClick);
+    
+    // 啟動 ResizeObserver
+    const editorStage = document.getElementById('editor-stage');
+    if (editorStage) {
+        new ResizeObserver(() => {
+            requestAnimationFrame(() => {
+                const modal = document.getElementById('editor-modal');
+                if (modal && !modal.classList.contains('hidden')) {
+                    document.querySelectorAll('.layer-text').forEach(el => {
+                        if (typeof el.refreshFontSize === 'function') el.refreshFontSize();
+                    });
+                } 
+            });
+        }).observe(editorStage);
+    }
+});
+
+
+// ==========================================
+// 2. 主邏輯 (Main Logic)
+// ==========================================
+
+async function handleFiles(files) {
+    if (files.length === 0) return;
+    const file = files[0];
+    const fileName = file.name;
+    const nameWithoutExt = fileName.substring(0, fileName.lastIndexOf('.')) || fileName;
+    APP.currentFileName = nameWithoutExt; 
+
+    showGlobalLoading(true, "正在讀取檔案...");
+    log(`讀取 ${files.length} 個檔案...`);
+    APP.pages = [];
+    document.getElementById('upload-view').classList.add('hidden');
+    document.getElementById('selection-view').classList.remove('hidden');
+    await new Promise(r => setTimeout(r, 100)); 
+    for (const file of files) {
+        try {
+            if (file.type === 'application/pdf') await loadPDF(file);
+            else if (file.type.startsWith('image/')) await loadImage(file);
+        } catch (e) { log(`Error: ${e.message}`, 'error'); }
+    }
+    renderGrid();
+    showGlobalLoading(false);
+}
+
+async function loadPDF(file) {
+    const buffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument(buffer).promise;
+    for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const viewport = page.getViewport({ scale: 2.0 });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width; canvas.height = viewport.height;
+        await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+        addPage(canvas.toDataURL('image/jpeg', 0.8), i, viewport.width, viewport.height);
+    }
+}
+
+async function loadImage(file) {
+    return new Promise(resolve => {
+        const reader = new FileReader();
+        reader.onload = e => {
+            const img = new Image();
+            img.onload = () => { 
+                addPage(e.target.result, APP.pages.length + 1, img.width, img.height); 
+                resolve(); 
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+function addPage(img, idx, w, h) { 
+    APP.pages.push({ 
+        id: Date.now() + idx, 
+        img, 
+        width: w, height: h, 
+        selected: true, 
+        result: null, 
+        status: 'pending' 
+    }); 
+}
+
+function renderGrid() {
+    const grid = document.getElementById('thumbnail-grid'); 
+    if(!grid) return;
+    grid.innerHTML = '';
+    let anyDone = false;
+    APP.pages.forEach((p, i) => {
+        if(p.status === 'done') anyDone = true;
+        const div = document.createElement('div');
+        div.className = `relative aspect-video bg-slate-200 dark:bg-slate-700 rounded-xl overflow-hidden cursor-pointer border-2 transition-all duration-200 group ${p.selected ? 'border-indigo-500 ring-2 ring-indigo-200 dark:ring-indigo-900' : 'border-transparent opacity-80'}`;
+        div.onclick = (e) => { 
+            if(e.target.tagName !== 'BUTTON' && !e.target.closest('button')) { 
+                p.selected = !p.selected; renderGrid(); 
+            } 
+        };
+        div.innerHTML = `
+            <img src="${p.img}" class="w-full h-full object-cover">
+            <div class="absolute top-2 left-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+                <button onclick="rotatePage(${i}, -90)" class="w-7 h-7 bg-black/60 hover:bg-black/80 text-white rounded-full backdrop-blur flex items-center justify-center text-xs" title="向左旋轉">↺</button>
+                <button onclick="rotatePage(${i}, 90)" class="w-7 h-7 bg-black/60 hover:bg-black/80 text-white rounded-full backdrop-blur flex items-center justify-center text-xs" title="向右旋轉">↻</button>
+            </div>
+            <div class="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-[10px] text-center py-1 font-bold">Page ${i+1}</div>
+            ${p.selected ? '<div class="absolute top-2 right-2 w-5 h-5 bg-indigo-500 rounded-full border-2 border-white shadow-md flex items-center justify-center text-white text-xs z-10">✓</div>' : ''}
+            ${p.result ? `<button onclick="loadEditor(${i})" class="absolute bottom-10 right-2 bg-white text-indigo-600 px-3 py-1 text-xs font-bold rounded-lg shadow-lg hover:scale-105 transition-transform z-10 border border-indigo-100">✏️ 編輯</button>` : ''}
+            ${p.status === 'pending' && !p.result ? '<div class="absolute inset-0 flex items-center justify-center pointer-events-none"><span class="bg-black/50 text-white text-xs px-2 py-1 rounded">等待分析</span></div>' : ''}
+        `;
+        grid.appendChild(div);
+    });
+    
+    const badge = document.getElementById('page-count-badge');
+    if(badge) badge.innerText = APP.pages.length;
+    
+    const exportBtn = document.getElementById('export-ppt-btn');
+    const startBtn = document.getElementById('start-process-btn');
+    if (anyDone) {
+        if(exportBtn) exportBtn.classList.remove('hidden');
+        if(startBtn) startBtn.innerText = "🔄 重新分析 (已選)";
+    } else {
+        if(startBtn) startBtn.innerText = "🚀 開始分析";
+    }
+}
+
+async function startProcessing() {
+    const targets = APP.pages.filter(p => p.selected);
+    if (targets.length === 0) return Dialog.alert('請選擇至少一頁');
+    document.getElementById('selection-view').classList.add('hidden');
+    document.getElementById('progress-view').classList.remove('hidden');
+    
+    if (APP.mode === 'offline' && !APP.tesseractWorker) {
+        log('正在初始化 Tesseract 核心...', 'info');
+        APP.tesseractWorker = await Tesseract.createWorker('chi_tra+eng');
+    }
+
+    const modelChain = [APP.model,'gemini-3-flash-preview','gemini-2.5-pro', 'gemini-2.5-flash-preview-09-2025'];
+    const uniqueChain = [...new Set(modelChain)];
+    const BATCH_SIZE = 10;  // 降低 Batch Size 可提高穩定性
+
+    for (let i = 0; i < targets.length; i += BATCH_SIZE) {
+        const batchPages = targets.slice(i, i + BATCH_SIZE);
+        const batchIndices = batchPages.map((_, idx) => i + idx + 1).join(', ');
+        
+        const pct = Math.round((i / targets.length) * 100);
+        const pBar = document.getElementById('progress-bar');
+        const pTitle = document.getElementById('progress-title');
+        if(pBar) pBar.style.width = `${pct}%`;
+        if(pTitle) pTitle.innerText = `分析頁面 [${batchIndices}]...`;
+
+        try {
+            let batchResults = [];
+            let success = false;
+            
+            if (APP.mode === 'ai') {
+                for (const m of uniqueChain) {
+                    try {
+                        log(`AI 批次分析中 (${m})...`, 'info');
+                        const rawResults = await runGeminiBatch(batchPages, m);
+                        if (rawResults && rawResults.length > 0) {
+                            batchResults = rawResults;
+                            success = true; break;
+                        }
+                    } catch(e) { log(`AI Batch 失敗 (${m}): ${e.message}`, 'warn'); }
+                }
+            }
+
+            for (let k = 0; k < batchPages.length; k++) {
+                const page = batchPages[k];
+                let blocks = [];
+                let pageSuccess = false;
+
+                if (success && batchResults[k]) {
+                    let raw = batchResults[k].blocks || batchResults[k]; 
+                    if (Array.isArray(raw)) {
+                        blocks = raw.map(item => ({
+                            text: item.text || item.Text || "", 
+                            box_2d: item.box_2d || item.box || [0,0,0,0],
+                            type: item.type || "body"
+                        })).filter(b => b.box_2d && b.box_2d.length === 4);
+                        pageSuccess = true;
+                    }
+                }
+
+		if (!pageSuccess) {
+                    log(`頁面 ${i+k+1} 轉為離線 OCR...`, 'warn');
+                    if (!APP.tesseractWorker) APP.tesseractWorker = await Tesseract.createWorker('chi_tra+eng');
+                    
+                    const tempImg = new Image();
+                    tempImg.src = page.img;
+                    await new Promise(r => tempImg.onload = r);
+                    
+                    const processedCanvas = preprocessImageForOCR(tempImg);
+                    
+                    const { data } = await APP.tesseractWorker.recognize(processedCanvas);
+                    
+                    blocks = mergeOfflineBlocks(
+                        data.words.map(w => ({ text: w.text, box: w.bbox, confidence: w.confidence })), 
+                        processedCanvas.width, 
+                        processedCanvas.height
+                    );
+                }
+
+                blocks = filterOverlappingBlocks(blocks);
+                let processedBlocks = blocks;
+                
+                if (cvReady && APP.mode === 'ai') {
+                    const tempImg = new Image();
+                    tempImg.src = page.img;
+                    await new Promise(r => tempImg.onload = r);
+                    processedBlocks = refineBlocksWithCV(tempImg, blocks);
+                }
+
+                const enhanced = await enhanceBlocksColors(page.img, processedBlocks);
+                page.result = { blocks: enhanced, background: page.img };
+                page.status = 'done';
+            }
+            log(`批次 [${batchIndices}] 完成`, 'success');
+        } catch (e) {
+            log(`錯誤: ${e.message}`, 'error');
+            batchPages.forEach(p => p.status = 'error');
+        }
+        if (i + BATCH_SIZE < targets.length) {
+            log('冷卻中 (避免 API 速率限制)...', 'info');
+            await new Promise(r => setTimeout(r, 4000));
+        }
+    }
+
+    const pBar = document.getElementById('progress-bar');
+    if(pBar) pBar.style.width = `100%`;
+    setTimeout(() => {
+        document.getElementById('progress-view').classList.add('hidden');
+        document.getElementById('selection-view').classList.remove('hidden');
+        renderGrid();
+        const firstDoneIdx = APP.pages.findIndex(p => p.status === 'done');
+        if(firstDoneIdx !== -1) loadEditor(firstDoneIdx);
+    }, 500);
+}
+
+// ==========================================
+// 4. 演算法與 AI 函數 (Algorithms)
+// ==========================================
+
+async function runGeminiBatch(pages, model) {
+const prompt = `
+    Role: High-Precision Document Layout Analysis Engine for PowerPoint Reconstruction.
+    Task: Analyze the ${pages.length} provided slide images sequentially and extract text blocks with precise coordinates.
+
+    *** CRITICAL RULES (MUST FOLLOW) ***:
+    1. **Semantic Grouping (HIGHEST PRIORITY):** - Do NOT fragment text into single lines. 
+       - Group related text lines (e.g., a paragraph, a multi-line list item, or a complete sentence) into a SINGLE block.
+       - If a sentence wraps to the next line, merge them.
+    
+    2. **Bounding Boxes:** - Return precise "box_2d" as [ymin, xmin, ymax, xmax] normalized to a 0-1000 scale.
+       - Ensure the box encompasses the entire grouped text area.
+
+    3. **Classification types:**
+       - "title": Main slide headlines (usually top, largest font).
+       - "header": Sub-headers or section titles.
+       - "body": Standard paragraph content.
+       - "list": Bullet points (Group the bullet symbol and the text together).
+       - "label": Short text labels inside charts, diagrams, or images.
+       - "footer": Page numbers or footnotes at the bottom.
+
+    4. **Alignment Detection:**
+       - "align": Detect visual alignment ("left", "center", "right"). Defaults to "left".
+
+    5. **Strict Output Format:** - Return RAW JSON ONLY. 
+       - Do NOT use Markdown code blocks (no \`\`\`json). 
+       - Do NOT include any introductory text.
+
+    *** EXPECTED JSON STRUCTURE ***:
+    {
+      "results": [
+        {
+          "page_index": 0,
+          "blocks": [
+            {
+              "text": "The full content of the paragraph...",
+              "box_2d": [100, 50, 200, 950],
+              "type": "body",
+              "align": "left"
+            }
+          ]
+        }
+        ... (repeat for all ${pages.length} images)
+      ]
+    }
+    `;
+    
+    const parts = [{ text: prompt }];
+    pages.forEach((page, index) => {
+        parts.push({ text: `\n[Image ${index}]:` }); 
+        parts.push({ inline_data: { mime_type: "image/jpeg", data: page.img.split(',')[1] } });
+    });
+
+    if (!APP.apiKey) log('無 API Key', 'warn');
+
+const maxRetries = 3;
+    let attempt = 0;
+    
+while (attempt < maxRetries) {
+        try {
+            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${APP.apiKey}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    contents: [{ role: "user", parts: parts }],
+                    generationConfig: { temperature: 0.1, topP: 0.95, maxOutputTokens: 65536 }
+                })
+            });
+
+            if (res.status === 429) {
+                attempt++;
+                const waitTime = attempt * 5000;
+                log(`API 忙碌 (429)，等待 ${waitTime/1000} 秒後重試...`, 'warn');
+                await new Promise(r => setTimeout(r, waitTime));
+                continue;
+            }
+
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            
+            const data = await res.json();
+            let txt = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+            
+            const parsed = safeJSONParse(txt);
+            
+            if (parsed.results && Array.isArray(parsed.results)) return parsed.results;
+            else if (Array.isArray(parsed)) return parsed;
+            
+            log("AI 回傳格式無法識別，跳過此批次。", 'warn');
+            return []; 
+
+        } catch (e) {
+            if (attempt === maxRetries - 1) {
+                console.error("Final Error:", e);
+                log(`批次處理發生錯誤: ${e.message}，已跳過。`, 'error');
+                return []; 
+            }
+            console.warn(`Attempt ${attempt} failed:`, e);
+        }
+        attempt++;
+    }
+    return [];
+}
+
+function safeJSONParse(str) {
+    str = str.replace(/```json|```/g, '').trim();
+    
+    const start = str.indexOf('{');
+    const end = str.lastIndexOf('}');
+    if (start !== -1 && end !== -1) {
+        str = str.substring(start, end + 1);
+    }
+
+    try {
+        return JSON.parse(str);
+    } catch (e) {
+        console.warn("JSON 解析失敗，嘗試修復截斷...", e.message);
+        
+        try {
+            let lastValidIndex = str.lastIndexOf('}]');
+            if (lastValidIndex !== -1) {
+                let fixedStr = str.substring(0, lastValidIndex + 2) + "]}";
+                return JSON.parse(fixedStr);
+            }
+            
+            if (str.lastIndexOf('}') < str.lastIndexOf('{')) {
+                 return JSON.parse(str + "}]}");
+            }
+        } catch (e2) {
+            console.error("JSON 修復失敗。", str);
+        }
+        return {}; 
+    }
+}
+
+function refineBlocksWithCV(imgElement, aiBlocks) {
+    if (!cvReady) return aiBlocks;
+    try {
+        const src = cv.imread(imgElement);
+        const gray = new cv.Mat(); const binary = new cv.Mat(); const dilated = new cv.Mat();
+        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+        cv.threshold(gray, binary, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
+        const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(10, 3)); 
+        cv.dilate(binary, dilated, kernel);
+        const contours = new cv.MatVector(); const hierarchy = new cv.Mat();
+        cv.findContours(dilated, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+        const cvRects = [];
+        const imgH = src.rows; const imgW = src.cols;
+        for (let i = 0; i < contours.size(); ++i) {
+            const rect = cv.boundingRect(contours.get(i));
+            if (rect.width > 5 && rect.height > 5) {
+                cvRects.push({ y0: (rect.y / imgH)*1000, x0: (rect.x / imgW)*1000, y1: ((rect.y+rect.height)/imgH)*1000, x1: ((rect.x+rect.width)/imgW)*1000 });
+            }
+        }
+        src.delete(); gray.delete(); binary.delete(); dilated.delete(); contours.delete(); hierarchy.delete(); kernel.delete();
+
+        return aiBlocks.map(block => {
+            if (!block.box_2d || block.box_2d.length < 4) return block;
+            const ai = { y0: block.box_2d[0], x0: block.box_2d[1], y1: block.box_2d[2], x1: block.box_2d[3] };
+            const intersections = cvRects.filter(cvR => {
+                const yA = Math.max(ai.y0, cvR.y0), xA = Math.max(ai.x0, cvR.x0);
+                const yB = Math.min(ai.y1, cvR.y1), xB = Math.min(ai.x1, cvR.x1);
+                return (xA < xB && yA < yB) && (((xB - xA) * (yB - yA)) / ((cvR.x1 - cvR.x0) * (cvR.y1 - cvR.y0)) > 0.5);
+            });
+            if (intersections.length > 0) {
+                let newY0=1000, newX0=1000, newY1=0, newX1=0;
+                intersections.forEach(r => { newY0=Math.min(newY0,r.y0); newX0=Math.min(newX0,r.x0); newY1=Math.max(newY1,r.y1); newX1=Math.max(newX1,r.x1); });
+                const pad = 3;
+                return { ...block, box_2d: [Math.max(0,newY0-pad), Math.max(0,newX0-pad), Math.min(1000,newY1+pad), Math.min(1000,newX1+pad)], snapped: true };
+            } 
+            return { ...block, snapped: false };
+        });
+    } catch (e) { console.error(e); return aiBlocks; }
+}
+
+function calculateSmartFontSize(box, text, type) {
+    const PPT_WIDTH_PT = 720; const PPT_HEIGHT_PT = 405; 
+    const widthPt = ((box[3] - box[1]) / 1000) * PPT_WIDTH_PT;
+    const heightPt = ((box[2] - box[0]) / 1000) * PPT_HEIGHT_PT;
+    const boxArea = widthPt * heightPt;
+    const safeText = (text || "").toString();
+    let weightedCount = Math.max(1, safeText.length * 0.8);
+    
+    const fillFactor = (type === 'title') ? 0.9 : 0.7;
+    let calcSize = Math.sqrt((boxArea * fillFactor) / weightedCount);
+
+    let minSize = 12, maxSize = 80;
+    if (type === 'title') { minSize = 28; maxSize = 96; calcSize *= 1.3; } 
+    else if (type === 'header') { minSize = 20; maxSize = 54; calcSize *= 1.1; }
+    else { minSize = 14; maxSize = 36; } 
+
+    return Math.round(Math.min(maxSize, Math.max(minSize, calcSize)));
+}
+
+function enhanceBlocksColors(imgBase64, blocks) {
+    if (!blocks) return [];
+    return new Promise(resolve => {
+        const img = new Image();
+        img.crossOrigin = "Anonymous";
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+
+            const enhanced = blocks.map(b => {
+                let box = b.box_2d || [0, 0, 0, 0];
+                
+                const y = Math.floor((box[0] / 1000) * img.height);
+                const x = Math.floor((box[1] / 1000) * img.width);
+                const h = Math.floor(((box[2] - box[0]) / 1000) * img.height);
+                const w = Math.floor(((box[3] - box[1]) / 1000) * img.width);
+
+                if (w <= 1 || h <= 1) return { ...b, bgColor: "#FFFFFF", textColor: "#000000", fontSize: 12, maskType: 'solid' };
+
+                const samplePad = 4; 
+                const sx = Math.max(0, x - samplePad);
+                const sy = Math.max(0, y - samplePad);
+                const sw = Math.min(img.width - sx, w + (samplePad * 2));
+                const sh = Math.min(img.height - sy, h + (samplePad * 2));
+
+                const imgDataOuter = ctx.getImageData(sx, sy, sw, sh);
+                const dataOuter = imgDataOuter.data;
+
+                const bgCounts = {};
+                let maxBgCount = 0;
+                let dominantBg = "255,255,255";
+                
+                let totalSamples = 0;
+                let consistentSamples = 0;
+
+                const samplePoints = [];
+                
+                for (let i = 0; i < sw; i++) { 
+                    samplePoints.push((i * 4)); // Top
+                    samplePoints.push(((sh - 1) * sw + i) * 4); // Bottom
+                }
+                for (let i = 0; i < sh; i++) { 
+                    samplePoints.push((i * sw) * 4); // Left
+                    samplePoints.push((i * sw + sw - 1) * 4); // Right
+                }
+
+                samplePoints.forEach(idx => {
+                    if (idx < 0 || idx >= dataOuter.length) return;
+                    if (dataOuter[idx + 3] < 50) return; 
+
+                    const key = `${dataOuter[idx]},${dataOuter[idx+1]},${dataOuter[idx+2]}`;
+                    bgCounts[key] = (bgCounts[key] || 0) + 1;
+                    if (bgCounts[key] > maxBgCount) {
+                        maxBgCount = bgCounts[key];
+                        dominantBg = key;
+                    }
+                });
+
+                const [bgR, bgG, bgB] = dominantBg.split(',').map(Number);
+
+                samplePoints.forEach(idx => {
+                    if (idx < 0 || idx >= dataOuter.length) return;
+                    if (dataOuter[idx + 3] < 50) return;
+
+                    const r = dataOuter[idx], g = dataOuter[idx+1], b = dataOuter[idx+2];
+                    const diff = Math.abs(r - bgR) + Math.abs(g - bgG) + Math.abs(b - bgB);
+                    
+                    totalSamples++;
+                    if (diff < 40) {
+                        consistentSamples++;
+                    }
+                });
+
+                const consistencyRatio = totalSamples > 0 ? (consistentSamples / totalSamples) : 1;
+                const isComplexBg = consistencyRatio < 0.85; 
+
+                const imgDataInner = ctx.getImageData(x, y, w, h);
+                const dataInner = imgDataInner.data;
+                const txtCounts = {};
+                let maxTxtCount = 0;
+                let dominantTxt = null;
+
+                for (let i = 0; i < dataInner.length; i += 16) { 
+                    if (dataInner[i + 3] < 128) continue;
+                    const dr = Math.abs(dataInner[i] - bgR);
+                    const dg = Math.abs(dataInner[i + 1] - bgG);
+                    const db = Math.abs(dataInner[i + 2] - bgB);
+                    if ((dr + dg + db) > 60) {
+                        const key = `${dataInner[i]},${dataInner[i + 1]},${dataInner[i + 2]}`;
+                        txtCounts[key] = (txtCounts[key] || 0) + 1;
+                        if (txtCounts[key] > maxTxtCount) { maxTxtCount = txtCounts[key]; dominantTxt = key; }
+                    }
+                }
+
+                let txtR, txtG, txtB;
+                if (dominantTxt) { [txtR, txtG, txtB] = dominantTxt.split(',').map(Number); } 
+                else {
+                    const bgLum = 0.299 * bgR + 0.587 * bgG + 0.114 * bgB;
+                    if (bgLum > 128) { txtR = 0; txtG = 0; txtB = 0; } else { txtR = 255; txtG = 255; txtB = 255; }
+                }
+
+                const finalBgLum = 0.299 * bgR + 0.587 * bgG + 0.114 * bgB;
+                const finalTxtLum = 0.299 * txtR + 0.587 * txtG + 0.114 * txtB;
+                if (Math.abs(finalBgLum - finalTxtLum) < 60) { // 提高到 60
+                     if (finalBgLum > 128) { txtR = 0; txtG = 0; txtB = 0; } else { txtR = 255; txtG = 255; txtB = 255; }
+                }
+
+                const toHex = (c) => { const hex = c.toString(16); return hex.length == 1 ? "0" + hex : hex; };
+                const bgHex = "#" + toHex(bgR) + toHex(bgG) + toHex(bgB);
+                const textHex = "#" + toHex(txtR) + toHex(txtG) + toHex(txtB);
+                const idealFs = calculateSmartFontSize(box, b.text, b.type);
+
+                return { 
+                    ...b, 
+                    box_2d: box, 
+                    bgColor: bgHex.toUpperCase(), 
+                    textColor: textHex.toUpperCase(), 
+                    fontSize: idealFs, 
+                    maskType: isComplexBg ? 'blur' : 'solid' 
+                };
+		const isValidHex = (hex) => /^#[0-9A-F]{6}$/i.test(hex);
+                const finalBg = isValidHex(bgHex) ? bgHex.toUpperCase() : "#FFFFFF";
+                const finalTxt = isValidHex(textHex) ? textHex.toUpperCase() : "#000000";
+
+                return { 
+                    ...b, 
+                    box_2d: box, 
+                    bgColor: finalBg, 
+                    textColor: finalTxt, 
+                    fontSize: idealFs, 
+                    maskType: isComplexBg ? 'blur' : 'solid' 
+                };
+
+            });
+            resolve(enhanced);
+        };
+        img.onerror = () => resolve(blocks); 
+        img.src = imgBase64;
+    });
+}
+
+function mergeOfflineBlocks(words, imgW, imgH) {
+    if (!words.length) return [];
+    
+    const W = imgW || 1920; 
+    const H = imgH || 1080;
+    
+    const clamp = (val) => Math.max(0, Math.min(1000, Math.round(val)));
+    const to1000 = (val, dim) => clamp((val / dim) * 1000);
+
+    let items = words.map(w => ({ 
+        text: w.text, 
+        y: w.box.y0, x: w.box.x0, 
+        h: w.box.y1 - w.box.y0, 
+        w: w.box.x1 - w.box.x0 
+    })).filter(i => i.w > 5 && i.h > 5); 
+
+    items.sort((a, b) => (Math.abs(a.y - b.y) > 10) ? a.y - b.y : a.x - b.x);
+    
+    const lines = []; 
+    let currentLine = null;
+
+    items.forEach(item => {
+        if (!currentLine) { currentLine = item; return; }
+        const yOverlap = Math.min(currentLine.y + currentLine.h, item.y + item.h) - Math.max(currentLine.y, item.y);
+        
+        if (yOverlap > (Math.min(currentLine.h, item.h) * 0.4) && (item.x - (currentLine.x + currentLine.w)) < (currentLine.h * 3)) {
+            currentLine.text += " " + item.text; // 加空格
+            currentLine.w = Math.max(currentLine.x + currentLine.w, item.x + item.w) - currentLine.x;
+            currentLine.h = Math.max(currentLine.y + currentLine.h, item.y + item.h) - currentLine.y;
+        } else {
+            lines.push({ 
+                text: currentLine.text, 
+                box_2d: [
+                    to1000(currentLine.y, H), 
+                    to1000(currentLine.x, W), 
+                    to1000(currentLine.y + currentLine.h, H), 
+                    to1000(currentLine.x + currentLine.w, W)
+                ], 
+                type: 'body' 
+            });
+            currentLine = item;
+        }
+    });
+
+    if (currentLine) {
+        lines.push({ 
+            text: currentLine.text, 
+            box_2d: [
+                to1000(currentLine.y, H), 
+                to1000(currentLine.x, W), 
+                to1000(currentLine.y + currentLine.h, H), 
+                to1000(currentLine.x + currentLine.w, W)
+            ], 
+            type: 'body' 
+        });
+    }
+    return lines;
+}
+
+function filterOverlappingBlocks(blocks) {
+    if (!blocks || blocks.length === 0) return [];
+    const sorted = [...blocks].sort((a, b) => {
+        const areaA = (a.box_2d[2]-a.box_2d[0]) * (a.box_2d[3]-a.box_2d[1]);
+        const areaB = (b.box_2d[2]-b.box_2d[0]) * (b.box_2d[3]-b.box_2d[1]);
+        return areaB - areaA;
+    });
+    const kept = [];
+    for (let i = 0; i < sorted.length; i++) {
+        let isRedundant = false;
+        for (let j = 0; j < kept.length; j++) {
+             const inner = sorted[i].box_2d, outer = kept[j].box_2d;
+             if (inner[0]>=outer[0]-10 && inner[1]>=outer[1]-10 && inner[2]<=outer[2]+10 && inner[3]<=outer[3]+10) { isRedundant = true; break; }
+        }
+        if (!isRedundant) kept.push(sorted[i]);
+    }
+    return kept;
+}
+
+
+function preprocessImageForOCR(imgElement) {
+    if (!cvReady) return imgElement; 
+
+    try {
+        let src = cv.imread(imgElement);
+        let dst = new cv.Mat();
+
+        cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY, 0);
+        let dsize = new cv.Size(src.cols * 2, src.rows * 2);
+        cv.resize(dst, dst, dsize, 0, 0, cv.INTER_LINEAR);
+        cv.threshold(dst, dst, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
+        const canvas = document.createElement('canvas');
+        cv.imshow(canvas, dst);
+        src.delete();
+        dst.delete();
+        
+        return canvas; 
+    } catch (e) {
+        console.error("OpenCV Preprocess Error:", e);
+        return imgElement; 
+    }
+}
+
+// ==========================================
+// 5. 編輯器函數 (Editor Functions)
+// ==========================================
+
+async function rotatePage(idx, degrees) {
+    const page = APP.pages[idx];
+    if (!page) return;
+    showGlobalLoading(true, "正在旋轉...");
+    const img = new Image();
+    img.onload = () => {
+        const cvs = document.createElement('canvas'); const ctx = cvs.getContext('2d');
+        if (Math.abs(degrees) === 90 || Math.abs(degrees) === 270) { cvs.width = img.height; cvs.height = img.width; } 
+        else { cvs.width = img.width; cvs.height = img.height; }
+        ctx.translate(cvs.width / 2, cvs.height / 2);
+        ctx.rotate(degrees * Math.PI / 180);
+        ctx.drawImage(img, -img.width / 2, -img.height / 2);
+        
+        page.img = cvs.toDataURL('image/jpeg', 0.9);
+        page.width = cvs.width; page.height = cvs.height; // Update dims
+        page.result = null; page.status = 'pending'; // Reset
+        renderGrid(); showGlobalLoading(false);
+    };
+    img.src = page.img;
+}
+
+async function rotateAll(degrees) {
+    if (APP.pages.length === 0) return;
+    if (!(await Dialog.confirm("確定要旋轉所有頁面嗎？這將清除分析結果。"))) return;
+    let processed = 0;
+    showGlobalLoading(true, `正在旋轉 (0/${APP.pages.length})...`);
+    
+    const processNext = (i) => {
+        if (i >= APP.pages.length) { showGlobalLoading(false); renderGrid(); return; }
+        const page = APP.pages[i];
+        const img = new Image();
+        img.onload = () => {
+            const cvs = document.createElement('canvas'); const ctx = cvs.getContext('2d');
+            if (Math.abs(degrees) === 90) { cvs.width = img.height; cvs.height = img.width; } 
+            else { cvs.width = img.width; cvs.height = img.height; }
+            ctx.translate(cvs.width / 2, cvs.height / 2);
+            ctx.rotate(degrees * Math.PI / 180);
+            ctx.drawImage(img, -img.width / 2, -img.height / 2);
+            
+            page.img = cvs.toDataURL('image/jpeg', 0.8);
+            page.width = cvs.width; page.height = cvs.height;
+            page.result = null; page.status = 'pending';
+            
+            processed++;
+            const msgEl = document.getElementById('global-loading-msg');
+            if(msgEl) msgEl.innerText = `正在旋轉 (${processed}/${APP.pages.length})...`;
+            processNext(i + 1);
+        };
+        img.src = page.img;
+    };
+    processNext(0);
+}
+
+function changePage(offset) {
+    const newIdx = APP.editor.currentIdx + offset;
+    if (newIdx >= 0 && newIdx < APP.pages.length) loadEditor(newIdx);
+}
+
+function activateEyedropper(type) {
+    if (APP.editor.selectedBlockIdx === -1) return Dialog.alert("請先選擇一個文字區塊");
+    APP.editor.pickingColor = type;
+    document.getElementById('editor-stage').style.cursor = 'crosshair';
+    const hint = document.getElementById('editor-hint');
+    hint.innerText = "🎯 請點擊圖片取色..."; hint.classList.add('bg-blue-600', 'text-white');
+    document.getElementById('editor-mask-layer').classList.add('pointer-events-none');
+    document.getElementById('editor-text-layer').classList.add('pointer-events-none');
+}
+
+function handleEyedropperClick(e) {
+    if (!APP.editor.pickingColor) return;
+    const img = document.getElementById('editor-img');
+    const rect = img.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (img.naturalWidth / rect.width);
+    const y = (e.clientY - rect.top) * (img.naturalHeight / rect.height);
+    const cvs = document.createElement('canvas'); cvs.width=1; cvs.height=1;
+    const ctx = cvs.getContext('2d'); ctx.drawImage(img, -x, -y);
+    const p = ctx.getImageData(0,0,1,1).data;
+    const hex = "#" + ((1<<24)+(p[0]<<16)+(p[1]<<8)+p[2]).toString(16).slice(1).toUpperCase();
+    
+    const input = document.getElementById(APP.editor.pickingColor==='text'?'edit-text-color':'edit-bg-color');
+    if(input) { input.value = hex; syncEditorChanges(); }
+    
+    APP.editor.pickingColor = null; 
+    document.getElementById('editor-stage').style.cursor = 'default';
+    const hint = document.getElementById('editor-hint'); 
+    hint.innerText = "💡 提示：拖曳紅框調整遮罩，雙擊文字進行編輯"; 
+    hint.classList.remove('bg-blue-600', 'text-white');
+    document.getElementById('editor-mask-layer').classList.remove('pointer-events-none');
+    document.getElementById('editor-text-layer').classList.remove('pointer-events-none');
+}
+
+function togglePreviewMode() {
+    APP.editor.isPreview = !APP.editor.isPreview;
+    const modal = document.getElementById('editor-modal');
+    const btn = document.getElementById('toggle-preview-btn');
+    if (APP.editor.isPreview) {
+        modal.classList.add('preview-mode');
+        btn.innerHTML = '<span>✏️</span> 返回編輯';
+        btn.classList.add('bg-slate-700', 'text-white');
+    } else {
+        modal.classList.remove('preview-mode');
+        btn.innerHTML = '<span>👁️</span> 預覽模式';
+        btn.classList.remove('bg-slate-700', 'text-white');
+    }
+}
+
+function closeEditor() {
+    document.getElementById('editor-modal').classList.add('hidden');
+    if (APP.editor.isPreview) togglePreviewMode();
+}
+
+function loadEditor(idx) {
+    APP.editor.currentIdx = idx; APP.editor.selectedBlockIdx = -1;
+    const page = APP.pages[idx]; if(!page || !page.result) return;
+    const modal = document.getElementById('editor-modal');
+    document.getElementById('editor-page-label').innerText = `Page ${idx+1}`;
+    document.getElementById('editor-toolbar').classList.remove('hidden');
+    document.getElementById('editor-img').src = page.img;
+    const maskLayer = document.getElementById('editor-mask-layer'); maskLayer.innerHTML = '';
+    const textLayer = document.getElementById('editor-text-layer'); textLayer.innerHTML = '';
+    modal.classList.remove('hidden');
+    
+    document.getElementById('prev-page-btn').disabled = idx === 0;
+    document.getElementById('next-page-btn').disabled = idx === APP.pages.length - 1;
+    document.getElementById('edit-text-val').value = '';
+    document.getElementById('editor-toolbar').classList.add('opacity-50', 'pointer-events-none');
+
+    page.result.blocks.forEach((block, bIdx) => {
+        // Mask
+        const mask = document.createElement('div');
+        mask.className = `layer-mask ${block.maskType === 'blur' ? 'blur-mode' : ''}`;
+        mask.id = `mask-block-${bIdx}`;
+        mask.style.top = (block.box_2d[0]/10)+'%'; mask.style.left = (block.box_2d[1]/10)+'%';
+        mask.style.height = ((block.box_2d[2]-block.box_2d[0])/10)+'%'; mask.style.width = ((block.box_2d[3]-block.box_2d[1])/10)+'%';
+        mask.style.backgroundColor = block.maskType === 'solid' ? (block.bgColor||'#FFF') : 'rgba(255,255,255,0.1)';
+        const mh = document.createElement('div'); mh.className = 'resize-handle'; mask.appendChild(mh);
+        
+        mh.onmousedown = (e) => {
+            e.stopPropagation(); e.preventDefault();
+            const startX = e.clientX, startY = e.clientY;
+            const startW = mask.offsetWidth, startH = mask.offsetHeight;
+            const pW = mask.parentElement.offsetWidth, pH = mask.parentElement.offsetHeight;
+            const doResize = (ev) => {
+                const newW = startW + (ev.clientX - startX), newH = startH + (ev.clientY - startY);
+                mask.style.width = (newW/pW*100)+'%'; mask.style.height = (newH/pH*100)+'%';
+                block.maskW = (newW/pW*1000); block.maskH = (newH/pH*1000);
+            };
+            const stop = () => { window.removeEventListener('mousemove', doResize); window.removeEventListener('mouseup', stop); };
+            window.addEventListener('mousemove', doResize); window.addEventListener('mouseup', stop);
+        };
+        maskLayer.appendChild(mask);
+
+        // Text
+        const textDiv = document.createElement('div'); textDiv.className = 'layer-text'; textDiv.id = `text-block-${bIdx}`;
+        textDiv.style.top = (block.box_2d[0]/10)+'%'; textDiv.style.left = (block.box_2d[1]/10)+'%';
+        textDiv.style.height = ((block.box_2d[2]-block.box_2d[0])/10)+'%'; textDiv.style.width = ((block.box_2d[3]-block.box_2d[1])/10)+'%';
+        const span = document.createElement('span'); span.innerText = block.text; span.style.color = (block.textColor||'#000');
+        
+        // Remove scale multiplier for better accuracy
+        textDiv.refreshFontSize = () => {
+             const w = document.getElementById('editor-stage').clientWidth;
+             if(w>0) span.style.fontSize = `${(block.fontSize||18)*(w/960)}px`;
+        };
+        requestAnimationFrame(() => textDiv.refreshFontSize());
+
+        const th = document.createElement('div'); th.className = 'resize-handle text-resize-handle';
+        textDiv.appendChild(th); textDiv.appendChild(span);
+        textDiv.onclick = (e) => { e.stopPropagation(); selectBlock(bIdx, block, textDiv); };
+
+        textDiv.onmousedown = (e) => {
+            if(e.target === th) return;
+            e.preventDefault(); selectBlock(bIdx, block, textDiv);
+            const startX=e.clientX, startY=e.clientY, startL=textDiv.offsetLeft, startT=textDiv.offsetTop;
+            const maskL=mask.offsetLeft, maskT=mask.offsetTop;
+            const pW=textDiv.offsetParent.offsetWidth, pH=textDiv.offsetParent.offsetHeight;
+            const doMove = (ev) => {
+                const dx=ev.clientX-startX, dy=ev.clientY-startY;
+                textDiv.style.left=(startL+dx)+'px'; textDiv.style.top=(startT+dy)+'px';
+                mask.style.left=(maskL+dx)+'px'; mask.style.top=(maskT+dy)+'px';
+            };
+            const stopMove = () => {
+                window.removeEventListener('mousemove', doMove); window.removeEventListener('mouseup', stopMove);
+                const ny = (textDiv.offsetTop/pH)*1000, nx = (textDiv.offsetLeft/pW)*1000;
+                const h = block.box_2d[2]-block.box_2d[0], w = block.box_2d[3]-block.box_2d[1];
+                block.box_2d = [ny, nx, ny+h, nx+w];
+            };
+            window.addEventListener('mousemove', doMove); window.addEventListener('mouseup', stopMove);
+        };
+        
+        th.onmousedown = (e) => {
+             e.stopPropagation(); e.preventDefault();
+             const startX = e.clientX, startY = e.clientY;
+             const startW = textDiv.offsetWidth, startH = textDiv.offsetHeight;
+             const pW = textDiv.parentElement.offsetWidth, pH = textDiv.parentElement.offsetHeight;
+             const doResize = (ev) => {
+                 const newW = startW + (ev.clientX - startX), newH = startH + (ev.clientY - startY);
+                 textDiv.style.width = (newW/pW*100)+'%'; textDiv.style.height = (newH/pH*100)+'%';
+                 block.box_2d[2] = block.box_2d[0] + (newH/pH*1000); block.box_2d[3] = block.box_2d[1] + (newW/pW*1000);
+                 textDiv.refreshFontSize();
+             };
+             const stop = () => { window.removeEventListener('mousemove', doResize); window.removeEventListener('mouseup', stop); };
+             window.addEventListener('mousemove', doResize); window.addEventListener('mouseup', stop);
+        };
+
+        textLayer.appendChild(textDiv);
+    });
+}
+
+function selectBlock(idx, block, textDiv) {
+    APP.editor.selectedBlockIdx = idx;
+    document.getElementById('editor-toolbar').classList.remove('opacity-50', 'pointer-events-none');
+    document.querySelectorAll('.layer-text').forEach(el => el.classList.remove('active'));
+    textDiv.classList.add('active');
+    document.getElementById('edit-text-val').value = block.text||"";
+    document.getElementById('edit-size-val').value = block.fontSize||16;
+    document.getElementById('edit-mask-type').value = block.maskType||'solid';
+    document.getElementById('edit-text-color').value = block.textColor||'#000000';
+    document.getElementById('edit-bg-color').value = block.bgColor||'#FFFFFF';
+    document.getElementById('val-text-color').innerText = block.textColor;
+    document.getElementById('val-bg-color').innerText = block.bgColor;
+}
+
+function syncEditorChanges() {
+    const idx = APP.editor.selectedBlockIdx; if (idx === -1) return;
+    const block = APP.pages[APP.editor.currentIdx].result.blocks[idx];
+    block.text = document.getElementById('edit-text-val').value;
+    block.fontSize = parseInt(document.getElementById('edit-size-val').value)||16;
+    block.maskType = document.getElementById('edit-mask-type').value;
+    block.textColor = document.getElementById('edit-text-color').value;
+    block.bgColor = document.getElementById('edit-bg-color').value;
+    
+    document.getElementById('val-text-color').innerText = block.textColor;
+    document.getElementById('val-bg-color').innerText = block.bgColor;
+    
+    const textDiv = document.getElementById(`text-block-${idx}`);
+    if(textDiv) { textDiv.querySelector('span').innerText = block.text; textDiv.querySelector('span').style.color = block.textColor; textDiv.refreshFontSize(); }
+    const maskDiv = document.getElementById(`mask-block-${idx}`);
+    if(maskDiv) { 
+        maskDiv.className = `layer-mask ${block.maskType==='blur'?'blur-mode':''}`;
+        maskDiv.style.backgroundColor = block.maskType==='solid' ? block.bgColor : 'rgba(255,255,255,0.1)';
+    }
+}
+
+function deleteSelectedBlock() {
+    const idx = APP.editor.selectedBlockIdx; if (idx === -1) return;
+    APP.pages[APP.editor.currentIdx].result.blocks.splice(idx, 1);
+    loadEditor(APP.editor.currentIdx);
+}
+
+// AI QA
+async function triggerAIQA() {
+    if (APP.editor.currentIdx === -1) return;
+    const page = APP.pages[APP.editor.currentIdx];
+    if (!page.result) return Dialog.alert("請先完成分析");
+  
+    const btn = document.getElementById('ai-qa-btn');
+    if(btn) { btn.disabled=true; btn.innerHTML=`<span class="animate-spin">⏳</span>`; btn.classList.add('opacity-50'); }
+    showGlobalLoading(true, "AI 微調中...");
+    
+    try {
+        const prompt = `Role: Layout QA. Task: Fix alignment/text, KEEP COORDINATES. Input: ${JSON.stringify(page.result.blocks.map(b=>({id:b.id||Math.random(), text:(b.text||"").substring(0,50), align:b.align})))}. Return JSON array with corrected align/text.`;
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${APP.model}:generateContent?key=${APP.apiKey}`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: "image/jpeg", data: page.img.split(',')[1] } }] }] })
+        });
+        const data = await res.json();
+        let txt = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
+        txt = txt.replace(/```json|```/g, '').trim();
+        const start = txt.indexOf('['), end = txt.lastIndexOf(']');
+        if(start !== -1 && end !== -1) {
+             const fixes = JSON.parse(txt.substring(start, end+1));
+             page.result.blocks = page.result.blocks.map(b => {
+                 const fix = fixes.find(f => f.text && b.text && (b.text.includes(f.text.substring(0,10))));
+                 if(fix) { return { ...b, align: fix.align || b.align }; } 
+                 return b;
+             });
+             loadEditor(APP.editor.currentIdx);
+             Dialog.alert("✅ 微調完成");
+        }
+    } catch(e) { console.error(e); Dialog.alert("微調失敗"); }
+    finally { showGlobalLoading(false); if(btn) { btn.disabled=false; btn.innerHTML=`<span>✨ AI 精修</span>`; btn.classList.remove('opacity-50'); } }
+}
+
+async function exportPPTX() {
+    const donePages = APP.pages.filter(p => p.selected && p.status === 'done');
+    if (!donePages.length) return Dialog.alert('無可匯出頁面');
+    
+    const pptx = new PptxGenJS();
+    pptx.author = ''; 
+    pptx.company = 'L.HW';
+    pptx.subject =`Source: ${APP.currentFileName} |  via NPS `; 
+    pptx.title = APP.currentFileName;
+    
+    const firstPage = donePages[0];
+    const fw = firstPage.width || 1280; 
+    const fh = firstPage.height || 720;
+    
+    const pptW = 10; 
+    const pptH = Number((pptW / (fw / fh)).toFixed(2)); 
+    
+    const layoutName = `AUTO_${fw}x${fh}`;
+    pptx.defineLayout({ name: layoutName, width: pptW, height: pptH });
+    pptx.layout = layoutName;
+    
+    for (const page of donePages) {
+        const slide = pptx.addSlide();
+        
+        const pw = page.width || 1280;
+        const ph = page.height || 720;
+        
+        const isRatioMatch = Math.abs((pw/ph) - (fw/fh)) < 0.01;
+        
+        if (isRatioMatch) {
+            slide.background = { data: page.img };
+        } else {
+            slide.background = { color: "1A1A1A" };
+            
+            let imgW_in, imgH_in, imgX_in, imgY_in;
+            const scaleX = pptW / pw;
+            const scaleY = pptH / ph;
+            const scale = Math.min(scaleX, scaleY);
+            
+            imgW_in = Number((pw * scale).toFixed(2));
+            imgH_in = Number((ph * scale).toFixed(2));
+            imgX_in = Number(((pptW - imgW_in) / 2).toFixed(2));
+            imgY_in = Number(((pptH - imgH_in) / 2).toFixed(2));
+            
+            slide.addImage({ data: page.img, x: imgX_in, y: imgY_in, w: imgW_in, h: imgH_in });
+        }
+
+        await Promise.all(page.result.blocks.map(async b => {
+            const x = b.box_2d[1]/10, y = b.box_2d[0]/10;
+            const w = (b.box_2d[3]-b.box_2d[1])/10, h = (b.box_2d[2]-b.box_2d[0])/10;
+            
+            if (b.maskType === 'blur') {
+                if (!b.blurImage) {
+                    const img = new Image(); img.src = page.img; await new Promise(r => img.onload = r);
+                    b.blurImage = generateBlurPatch(img, b.box_2d);
+                }
+                slide.addImage({ data: b.blurImage, x: x+'%', y: y+'%', w: w+'%', h: h+'%' });
+            } else {
+                const safeColor = (b.bgColor || 'FFFFFF').replace(/#/g, '');
+                slide.addShape(pptx.ShapeType.rect, { 
+                    x: (x-0.1)+'%', y: (y-0.1)+'%', w: (w+0.2)+'%', h: (h+0.2)+'%', 
+                    fill: { color: safeColor }, line: { type: 'none' } 
+                });
+            }
+        }));
+
+        // 文字層
+	page.result.blocks.forEach(b => {
+             const x = b.box_2d[1]/10, y = b.box_2d[0]/10;
+             const w = Math.max(1, (b.box_2d[3]-b.box_2d[1])/10);
+             const h = Math.max(1, (b.box_2d[2]-b.box_2d[0])/10);
+
+             let alignVal = b.align || 'left'; 
+             if (!b.align) {
+                 if (b.type === 'label') alignVal = 'center';
+                 else if (b.type === 'title') alignVal = 'left';
+             }
+             
+             let safeColor = '000000';
+             if (b.textColor && typeof b.textColor === 'string') {
+                 safeColor = b.textColor.replace(/#/g, '');
+             }
+
+             let safeText = (b.text || "").toString();
+             safeText = safeText.replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F]/g, "");
+
+             const finalFontSize = Math.max(10, b.fontSize || 16);
+
+             slide.addText(safeText, {
+                 x: x+'%', y: y+'%', w: w+'%', h: h+'%',
+                 fontSize: finalFontSize, 
+                 color: safeColor,
+                 bold: b.type === 'title' || b.type === 'header',
+                 align: alignVal, 
+                 valign: b.type === 'label' ? 'middle' : 'top',
+                 margin: 2, 
+                 fit: 'shrink', 
+                 wrap: true
+             });
+        });    }
+    
+    const finalName = `Edit_${APP.currentFileName}.pptx`;
+    await pptx.writeFile({ fileName: finalName });
+    log(`匯出完成 (${finalName})`, 'success');
+}
+
+function generateBlurPatch(img, box) {
+    const cvs = document.createElement('canvas');
+    const x = (box[1]/1000)*img.width, y = (box[0]/1000)*img.height;
+    const w = ((box[3]-box[1])/1000)*img.width, h = ((box[2]-box[0])/1000)*img.height;
+    cvs.width = w; cvs.height = h;
+    const ctx = cvs.getContext('2d'); ctx.drawImage(img, -x, -y);
+    StackBlur.canvasRGBA(cvs, 0, 0, w, h, 30);
+    return cvs.toDataURL('image/jpeg', 0.8);
+}
+
+</script>
+</body>
+</html>
